@@ -97,3 +97,14 @@ Ahora asumamos que estamos tratando de construir un planificador STCF. Como expl
 Un enfoque comun es trata cada subproceso de 10ms de A como un proceso independiente. Por lo tanto, cuando el sistema comienza, su opcion seria, ya sea ejecutar 10ms A o ejecutar 50ms B. Con **STCF**, la opcion es clara: elejir la mas corta, en este caso A. Entonces, cuando la primer 
 subproceso de A se completa, solo queda B y empieza a ejecutarse. 
 Entonces un nuevo subproceso de A en mandado y reemplaza a B y se ejecuta por 10ms. Hacer esto permite la **superposicion (overlap)**, con la CPU siendo usada por otro proceso mientras espera que el I/O de otro proceso se complete; por lo tanto el sistema es mejor utilizado (de forma mas eficiente).
+
+
+### En resumen
+
+FIFO --> El primero que llega se ejecuta
+SBJ --> Se ejecuta primero el mas corto
+STCF --> Ejecuto primero el que tarde menos tiempo en completarse
+RR --> Ejecuto varios procesos por un cierto periodo de tiempo (quantum)
+
+Si buscamos menos tiempo de entrega -> Ejecutamos los mas cortos primero
+Si buscamos menos tiempo de respuesta -> El sistema se siente interactivo, pero se aumenta el tiempo de entrega
