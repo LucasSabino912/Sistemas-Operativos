@@ -1,0 +1,194 @@
+**Ejercicio 1.** En un sistema operativo que implementa procesos se ejecutan instancias del proceso pi que computa los dígitos de pi con precisión arbitraria.
+```bash
+$ time pi 1000000 > /dev/null & ... & time pi 1000000 > /dev/null &
+```
+Y se registran los siguientes resultados, donde en las mediciones se muestra (real, user), es decir el tiempo del reloj de la pared (walltime) y el tiempo que insumió de CPU (cputime).
+**Instancias**                         **Medición**
+1                                          (2.56,2.44)
+2                                          (2.53,2.42), (2.58,2.40)
+1                                          (3.44,2.41)
+4                                          (5.12,2.44), (5.13,2.44), (5.17,2.46), (5.18,2.46)
+3                                          (3.71,2.42), (3.85,2.42), (3.86,2.44)
+2                                          (5.04,2.36), (5.09,2.43)
+4                                          (7.67,2.41), (7.67,2.44), (7.73,2.44), (7.75,2.46)
+(a) ¿Cuantos núcleos tiene el sistema?
+(b) ¿Porque a veces el cputime es menor que el walltime?
+(c) Indique en la Descripción que estaba pasando en cada medicion.
+
+a) Vemos que en la primera corrida una instancia tiene 2.56 de real time, en la segunda vemos que 2 instancias del mismo proceso tienen un real time casi igual, lo que nos da la pauta de que tiene mínimo 2 núcleos. Si vemos la corrida que tiene 3 instancias vemos que el real time sube un poco y en la de 4 instancias se duplica en relación a la de 2 instancias. Por lo tanto el sistema tiene **2 núcleos**
+
+b) El walltime es mayor porque el cputime solo toma el tiempo en el que el proceso es ejecutado, y el walltime toma desde que estaba en la cola de ejecución esperando a pasar de **ready** a **running**. cputime **solo** toma cuando el proceso esta en **running** 
+
+**Ejercicio 2.** En un sistema operativo que implementa procesos e hilos se ejecutan el siguiente proceso. Explique porque ahora walltime < cputime.
+```bash
+
+	$ time ./dgemm 2000 2000 2000
+	test!
+	m=2000,n=2000,k=2000,alpha=1.200000,beta=0.001000,sizeofc=4000000
+	real 0m1.027s
+	user 0m1.752s
+```
+Al implementar hilos (multithreading), el programa `dgemm` dividió su trabajo en múltiples tareas simultáneas.
+
+Si el planificador del sistema operativo agarró 2 hilos de este programa y puso a correr uno en el Núcleo 1 y el otro en el Núcleo 2 **al mismo tiempo**, ambos núcleos empiezan a sumar tiempo de CPU en paralelo.
+
+Imaginemos un escenario ideal:
+1. El programa arranca y lanza dos hilos.
+2. Vos mirás tu reloj de pared durante **~0.876 segundos** (tiempo `real`).
+3. Durante esos 0.876 segundos, el Núcleo 1 trabajó al 100%. Suma **0.876s** de `cputime`.
+4. Durante esos mismos 0.876 segundos, el Núcleo 2 trabajó al 100%. Suma otros **0.876s** de `cputime`
+5. El sistema operativo suma el esfuerzo total de la CPU: `0.876 + 0.876 =` **1.752 segundos de `user time`**.
+Siempre que el cputime sea mayor al realtime significa que el programa esta utilizando paralelizacion y multihilos
+
+**Ejercicio 3.** Describir donde se cumplen las condiciones user<real, user=real, real<user.
+
+**Caso `user < real`**
+Cuando el proceso **tiene que esperar** y no puede usar la CPU durante todo el tiempo que dura su ejecución.
+
+**Condiciones que lo provocan:**
+- **Carga alta en el sistema (Multiprogramación):** Hay muchos otros procesos compitiendo. Tu proceso pasa tiempo en estado **READY** (listo) esperando que el planificador (scheduler) le asigne un quantum de CPU.
+- **Operaciones de Entrada/Salida (I/O):** El proceso necesita leer un archivo del disco, esperar un paquete de red o esperar que el usuario teclee algo. Pasa a estado **BLOCKED** (bloqueado) y la CPU se le asigna a otro programa.
+- **Llamadas a dormir (`sleep`):** El proceso suspende explícitamente su ejecución por un tiempo determinado.
+
+**Caso `user ≈ real`** 
+**¿Cuándo ocurre?** Cuando el proceso tiene el monopolio de un núcleo del procesador desde que arranca hasta que termina, sin interrupciones.
+
+**Condiciones que lo provocan:**
+- Es un programa **monohilo** (single-threaded).
+- Es un programa **CPU-bound** (limitado por CPU), es decir, solo hace cálculos matemáticos pesados en memoria (como calcular Pi) y **no** hace operaciones lentas de Entrada/Salida (no lee disco, no usa red).
+- El sistema operativo está "ocioso" (libre de carga externa), por lo que el proceso casi nunca es expulsado del estado **RUNNING** para darle lugar a otro.
+
+**Caso `real < user`**
+**¿Cuándo ocurre?** Cuando el programa ejecuta múltiples tareas simultáneamente en distintos núcleos físicos.
+
+**Condiciones que lo provocan:**
+- El programa utiliza **paralelismo puro** (mediante múltiples hilos / _multithreading_ o procesos hijos).
+- El hardware es **Multicore** (multinúcleo).
+- Al ejecutarse en paralelo, el tiempo `user` suma el tiempo de procesamiento de _todos_ los núcleos al mismo tiempo. Por ejemplo, si 4 hilos corren a tope durante 1 segundo real en 4 núcleos distintos, el tiempo `real` será 1 segundo, pero el tiempo `user` será 4 segundos.
+
+**Ejercicio 4**. Un programa define la variable int x=100 dentro de main() y hace fork().
+(a) ¿Cuanto vale x en el proceso hijo?
+(b) ¿Que le pasa a la variable cuando el proceso padre y el proceso hijo le cambian de valor?
+(c) Contestar nuevamente las preguntas si el compilador genera código de maquina colocando esta variable en un registro del microprocesador.
+
+
+**Ejercicio 5.** Indique cuantas letras “a” imprime este programa, describiendo su funcionamiento.
+```c
+printf("a\n");
+fork();
+printf("a\n");
+fork();
+printf("a\n");
+fork();
+printf("a\n");
+Generalice a n forks. Analice para n=1, luego para n=2, etc., busque la serie y deduzca la expresi´on
+general en funci´on del n.
+```
+
+**Ejercicio 6.** Indique cuantas letras “a” imprime este programa
+```c
+char * const args[] = {"/bin/date", "-R", NULL};
+execv(args[0], args);
+printf("a\n");
+```
+
+**Ejercicio 7.** Indique que hacen estos programas
+```c
+int main(int argc, char ** argv) {
+	if (0<--argc) {
+		argv[argc] = NULL;
+		execvp(argv[0], argv);
+	}
+	return 0;
+}
+```
+
+```c
+
+int main(int argc, char ** argv) {
+	if (argc<=1)
+		return 0;
+	
+	int rc = fork();
+	if (rc<0)
+		return -1;
+	else if (0==rc)
+		return 0;
+	else {
+		argv[argc-1] = NULL;
+		execvp(argv[0], argv);
+	}
+}
+```
+
+Ejercicio 8. Si estos programas hacen lo mismo. ¿Para que esta la syscall dup()? ¿UNIX tiene un
+mal diseño de su API?
+```c
+close(STDOUT_FILENO);
+open("salida.txt", O_CREAT | O_WRONLY | O_TRUNC, S_IRWXU);
+printf("¡Mira mama salgo por un archivo!");
+```
+```c
+fd = open("salida.txt", O_CREAT | O_WRONLY | O_TRUNC, S_IRWXU);
+close(STDOUT_FILENO);
+dup(fd);
+printf("¡Mir´a mam´a salgo por un archivo!");
+```
+
+Ejercicio 9. Este programa se llama bomba fork. ¿C´omo funciona? ¿Es posible mitigar sus efectos?
+```c
+	while(1)
+		fork();
+```
+
+**Ejercicio 11.** Dentro de xv6 el archivo x86.h contiene struct trapframe donde se guarda toda la información cuando se produce un trap. Indicar que parte es la que apila el hardware cuando se
+produce un trap y que parte apila el software.
+
+**Ejercicio 12.** Verdadero o falso. Explique.
+	(a) Es posible que user+sys < real.
+	(b) Dos procesos no pueden usar la misma dirección de memoria virtual.
+	(c) Para guardar el estado del proceso es necesario salvar el valor de todos los registros del microprocesador.
+	(d) Un proceso puede ejecutar cualquier instrucción de la ISA.
+	(e) Puede haber traps por timer sin que esto implique cambiar de contexto.
+	(f) fork() devuelve 0 para el hijo, porque ningun proceso tiene PID 0.
+	(g) Las syscall fork() y execv() est´an separadas para poder redireccionar los descriptores de archivo.
+	(h) Si un proceso padre llama a exit() el proceso hijo termina su ejecucion de manera inmediata.
+	(i) Es posible pasar información de padre a hijo a través de argv, pero el hijo no puede comunicar información al padre ya que son espacios de memoria independientes.
+	(j) Nunca se ejecuta el codigo que esta despues de execv().
+	(k) Un proceso hijo que termina, no se puede liberar de la Tabla de Procesos hasta que el padre no haya leıdo el exit status via wait().
+
+### Políticas
+**Ejercicio 13.** Dados tres procesos CPU-bound puros A, B, C con Tarrival en 0 para todos y Tcpu de
+30, 20 y 10 respectivamente. Dibujar la lınea de tiempo para las polıticas de planificacion FCFS y
+SJF. Calcular el promedio de Tturnaround y Tresponse para cada pol´ıtica.
+
+
+**Ejercicio 14.** Para esto procesos CPU-bound puros dibujar la l´ınea de tiempo y completar la tabla
+para las políticas apropiativas (con flecha de running a ready): STCF, RR(Q=2). Calcular el promedio
+de Tturnaround y Tresponse en cada caso.
+
+Proceso Tarrival    TCPU   |  Tfirstrun   Tcompletion  |  Tturnaround    Tresponse
+   A                2              4        |                                                 |
+   B                0              3        |                                                 |
+   C                4              1        |                                                 |
+
+
+**Ejercicio 15.** Las políticas de planificación se pueden clasificar en dos grades grupos: por lotes
+(batch) e interactivas. Otra criterio posible es si la planificación necesita el TCP U o no. Clasificar
+FCFS, SJF, STCF, RR, MLFQ segun estos dos criterios.
+
+**Ejercicio 17.** Realice el diagrama de planificaci´on para un planificador MLFQ con cuatro colas
+(Q=1, 2, 4 y 8) para los siguientes procesos CPU-bound:
+Proceso Tarrival Tcpu
+   A                0          7
+   B                1          3
+   C                2          4
+   D                4          3
+   E                 7          4
+   
+**Ejercicio 18.** Verdadero o falso. Explique.
+	(a) Cuando el planificador es apropiativo (con flecha de Running a Ready) no se puede devolver el control hasta que no pase el quantum.
+	(b) Entre las pol´ıticas por lote FCFS y SJF, hay una que siempre es mejor que la otra respecto a Tturnaround.
+	(c) La polıtica RR con quanto = ∞ es FCFS.
+	(d) MLFQ sin priority boost hace que algunos procesos puedan sufrir de starvation (inanición).
+	(e) En MLFQ acumular el tiempo de CPU independientemente del movimiento entre colas evita hacer trampas como yield() un poquitito antes del quantum
