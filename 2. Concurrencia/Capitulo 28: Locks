@@ -1,0 +1,69 @@
+# Locks
+Un **lock** es una primitiva de sincronización abstracta que protege una sección crítica de código, permitiendo que solo un hilo a la vez acceda a ella.
+
+### Conceptos Fundamentales
+
+- **Estados:**
+    - **Available (Unlocked/Free):** Ningún hilo posee el lock.
+    - **Acquired (Locked/Held):** Un hilo (y solo uno) posee el lock.
+        
+- **`lock()`:** Intenta adquirir el lock. Si está disponible, el hilo se vuelve "dueño" y entra. Si no, el hilo se queda esperando (bucle de espera) hasta obtenerlo.
+    
+- **`unlock()`:** Libera el lock. Solo el dueño del lock puede realizar esta acción.
+    
+- **Estrategias de granularidad:**
+    
+    - **Grano grueso (_Coarse-grained_):** Un solo lock protege toda la zona crítica.
+        
+    - **Grano fino (_Fine-grained_):** Múltiples locks protegen diferentes datos, permitiendo más concurrencia.
+### Implementaciones de Locks
+
+#### 1. Desactivar Interrupciones
+
+- **Cómo funciona:** El hilo deshabilita las interrupciones del procesador al entrar a la sección crítica.
+    
+- **Limitación:** Solo funciona en sistemas mononúcleo (_mono-core_). Es peligroso si se abusa de ella, ya que el sistema operativo pierde el control del CPU.
+    
+
+#### 2. Usar solo Loads/Stores (Intento fallido)
+
+- Se usa una variable bandera (_flag_) para indicar si el lock está tomado.
+    
+- **Problemas:** No garantiza exactitud (_correctness_) ante la concurrencia y genera un desperdicio enorme de recursos (_performance_) al hacer espera activa (_spin wait_).
+    
+
+#### 3. Spinlocks con soporte de Hardware
+
+Para garantizar la exclusión mutua, se requieren instrucciones atómicas:
+
+- **Test-And-Set (_Atomic Exchange_):** Devuelve el valor anterior y actualiza con uno nuevo de forma atómica.
+    
+- **Compare-And-Swap (CaS):** Compara un valor esperado y, si coincide, lo actualiza. Es más potente que _Test-And-Set_ y sirve para estructuras _lock-free_.
+    
+- **Load-Linked y Store-Conditional (LL/SC):** Son dos instrucciones desacopladas. `SC` solo tiene éxito si no hubo ninguna operación de escritura en esa dirección de memoria desde el `LL` anterior.
+    
+- **Fetch-And-Add:** Incrementa un valor atómicamente y devuelve el valor viejo. Se usa para construir **Ticket Locks**, donde cada hilo recibe un "turno" y garantiza justicia (_fairness_) y progreso para todos.
+    
+
+### Optimización del Spinning (Espera activa)
+
+El _spinning_ consume ciclos de CPU innecesariamente. Existen alternativas:
+
+1. **Enfoque simple: _Yield_ (Ceder el paso)**
+    
+    - El hilo que espera cede el CPU (_yield_) esperando que el hilo dueño termine su ejecución.
+        
+    - _Problema:_ El costo de cambiar de contexto es alto y no resuelve la inanición (_starvation_).
+        
+2. **Enfoque con colas: _Sleep_ (Dormir)**
+    
+    - El sistema operativo mantiene una cola de hilos esperando. Cuando el lock se libera, el SO despierta explícitamente al siguiente hilo de la cola.
+        
+    - _Riesgo:_ Requiere manejo cuidadoso del _timing_ para evitar condiciones de carrera (_wakeup/waiting race_).
+        
+3. **Enfoque híbrido: _Two-phase Locks_**
+    
+    - **Fase 1:** El hilo hace _spin_ por un periodo corto (por si la sección crítica es muy breve).
+        
+    - **Fase 2:** Si no adquiere el lock rápido, el hilo pasa a estado _sleep_ (dormido).
+        

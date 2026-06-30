@@ -1,0 +1,123 @@
+
+# Variables de condición
+
+El sistema lock-unlock no es _synchronization complete_, por lo que para construir programas concurrentes es necesario utilizar otras primitivas de sincronización. En particular, es necesario para cuando un hilo desea chequear una _condition_ antes de continuar su ejecución (si un hilo “hijo” terminó su ejecución por ej.) sin usar una variable global (chequeos spin = ineficiente).
+
+### Definición y rutinas
+
+Para esperar que una condición se vuelva `true`, un hilo puede usar una **condition variable**; una lista explícita en la que hilos en algún estado de ejecución (_condition_) que no es el deseado (esperando a la condición, chequeando si puede obtener el lock) se insertan. Luego, algún otro hilo, puede despertar uno o varios de esos hilos en espera cuando cambie dicho estado, y así permitirles que continúen (al darle una señal/_signaling_ a la condición) su ejecución.
+
+Se utilizan las rutinas `wait()` y `signal()` definidas en el capítulo 27.
+
+Es recomendable, para evitar errores, mantener el lock mientras se llama a `signal` o `wait`.
+
+### El problema del productor-consumidor (Bounded Buffer)
+
+El problema de sincronización productor/consumidor se da cuando tenemos uno o más hilos productores y uno o más hilos consumidores. Los productores generan _data items_ y los colocan en un buffer, mientras que los consumidores obtienen y consumen dichos elementos.
+
+Como este buffer es un recurso compartido, se necesita alguna clase de sincronización para acceder al mismo y evitar una condición de carrera (_race condition_).
+
+_Ejemplo de buffer int, en el que el productor solo coloca un elemento si el buffer está vacío, y el consumidor solo consume un elemento si el contador indica un elemento._
+
+```c
+int buffer;
+int count = 0; // Inicialmente vacío
+
+void put(int value) {
+    assert(count == 0); // Falla si el buffer no está vacío
+    count = 1;
+    buffer = value;
+}
+
+int get() {
+    assert(count == 1); // Falla si el buffer está vacío
+    count = 0;
+    return buffer;
+}
+```
+
+#### Primer intento (condition variable)
+
+Tanto `put()` como `get()` tienen secciones críticas que debemos proteger, pero no es suficiente solo con locks y hacen falta condition variables.
+
+```c
+// EJEMPLO DEL PRIMER INTENTO (INCORRECTO)
+void *producer(void *arg) {
+    int i;
+    for (i = 0; i < loops; i++) {
+        pthread_mutex_lock(&mutex);
+        if (count == 1) // Chequeo con IF
+            pthread_cond_wait(&cond, &mutex);
+        put(i);
+        pthread_cond_signal(&cond);
+        pthread_mutex_unlock(&mutex);
+    }
+}
+```
+
+La solución actual no funciona para más de dos hilos (un consumidor y un productor) ya que se puede dar el caso en el que un consumidor intente consumir y no haya buffers disponibles de los que consumir.
+
+En ese caso se dormiría, un productor llenaría el buffer y daría la señal de que está lleno, el consumidor se podría despertar y tratar de adquirir el lock, pero antes de esto otro consumidor podría obtenerlo y consumir el buffer para luego soltar el lock. Si ese lock lo obtiene el primer consumidor e intenta consumir del buffer, al estar este vacío se levantaría una excepción.
+
+No hay garantía de que desde cuando un hilo se despierte hasta que adquiera el lock y se ejecute, la condición por la que se despertó se mantenga. Esta interpretación de señales es conocida como **Mesa semantics**.
+
+#### Segundo intento (while, not if)
+
+Si cambiamos el cómo se chequea la condición y en vez de un `if` ponemos un `while`, cuando un hilo consumidor ejecute la rutina va a rechequear siempre la condición (que lo despertó en un comienzo), y si no está en `true` se duerme.
+
+```c
+// EJEMPLO DEL SEGUNDO INTENTO (CON WHILE)
+        pthread_mutex_lock(&mutex);
+        while (count == 1) // Chequeo con WHILE
+            pthread_cond_wait(&cond, &mutex);
+        put(i);
+        pthread_cond_signal(&cond);
+        pthread_mutex_unlock(&mutex);
+```
+
+Gracias a _Mesa Semantics_ la regla que siempre debemos recordar es **siempre usar while loops**. Aunque no sea totalmente necesario es más seguro. Pero todavía hay un error:
+
+Si luego de consumir un buffer y antes de dormir un consumidor despierta a otro consumidor en vez de a un productor, podría suceder que todos los hilos duerman indefinidamente. Por ello, las señales deben ser directas y un consumidor no debería poder despertar a otros consumidores (solo a productores) y viceversa.
+
+#### Solución para un único buffer de productor-consumidor
+
+La solución es usar **dos variables de condición** para dar la señal de qué tipo de hilo debería despertar cuando el estado del sistema cambia. Los consumidores esperan en una condición `empty` (“hay al menos un lugar vacío”) y dan la señal de `fill` (“hay al menos un lugar ocupado”); los productores esperan en la señal `fill` y dan la señal `empty`. Así, un consumidor nunca puede despertar a otro consumidor y viceversa.
+
+_La solución correcta del productor-consumidor:_
+
+```c
+pthread_cond_t empty, fill;
+pthread_mutex_t mutex;
+
+void *producer(void *arg) {
+    int i;
+    for (i = 0; i < loops; i++) {
+        pthread_mutex_lock(&mutex);
+        while (count == 1) 
+            pthread_cond_wait(&empty, &mutex); // Espera a que esté vacío
+        put(i);
+        pthread_cond_signal(&fill); // Avisa que lo llenó
+        pthread_mutex_unlock(&mutex);
+    }
+}
+
+void *consumer(void *arg) {
+    int i;
+    for (i = 0; i < loops; i++) {
+        pthread_mutex_lock(&mutex);
+        while (count == 0) 
+            pthread_cond_wait(&fill, &mutex); // Espera a que esté lleno
+        int tmp = get();
+        pthread_cond_signal(&empty); // Avisa que lo vació
+        pthread_mutex_unlock(&mutex);
+    }
+}
+```
+
+Se puede crear una solución más general modificando las rutinas y añadiendo más buffers, consumidores y productores, aumentando así la concurrencia y optimizando el desempeño, permitiendo que un productor duerma solo si todos los buffers están llenos y que un consumidor duerma solo si todos los buffers están vacíos.
+
+### Condiciones de cobertura
+
+Otro problema de concurrencia ocurre cuando un hilo intenta pedir/asignar memoria, y si no hay memoria disponible se duerme. Luego, si un hilo libera memoria da una señal de que hay memoria, pero debe decidir a qué hilo (o hilos) despertar.
+
+Una solución que evita problemas es despertarlos a todos (usando por ejemplo `pthread_cond_broadcast()`), con el costo de despertar hilos innecesariamente. Esto se llama **covering condition** y asegura que cubre los casos que deben ser cubiertos, sacrificando la eficiencia.

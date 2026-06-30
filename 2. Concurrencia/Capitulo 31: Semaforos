@@ -1,0 +1,165 @@
+# Semaforos
+Un semáforo es una primitiva de sincronización, un objeto con un valor entero que puede usarse como lock y como condition variable, y puede ser manipulado con dos rutinas; `sem_wait()` y `sem_post()`.
+
+El valor inicial del semáforo determina su comportamiento, por lo que debe ser inicializado antes de llamar otra rutina que interactúe con él.
+
+_Ejemplo de inicialización._
+
+
+```c
+#include <semaphore.h>
+
+sem_t s;
+// Argumentos: puntero al semáforo, 0 (compartido entre hilos), valor inicial
+sem_init(&s, 0, 1); 
+```
+
+El valor inicial es 1, ya que 0 indicaría que está siendo compartido por hilos del mismo proceso (en el parámetro del medio).
+
+- `sem_wait()` puede volver inmediatamente (si el valor del sem era 1 o mayor) o causar que el hilo se duerma. Con muchos hilos llamando a wait, se hará una cola en espera a ser despertados.
+    
+- `sem_post()` no espera por ninguna condición; solo incrementa el valor del sem y, si hay algún hilo esperando ser despertado, despierta uno de ellos.
+    
+
+Cuando el valor del semáforo es negativo, su valor (absoluto) es igual al número de hilos esperando despertar (este valor suele estar escondido al usuario).
+
+### Semáforos binarios (uso como locks)
+
+Los semáforos pueden ser usados como un lock si se rodea la sección crítica con un par de `sem_wait()` / `sem_post()`. Como los locks solo tienen dos estados (_held_ or _not held_), el uso de un semáforo como lock es llamado **binary semaphore**.
+
+Para que funcione correctamente, el valor inicial del sem debe ser 1; el primer hilo que lo obtenga dejará el valor en 0 y entrará a la zona crítica, el siguiente hilo dejará el sem en -1 y será suspendido/dormido, etc. Al terminar el primer hilo, dejará el sem en 0 y despertará al siguiente hilo (que quedará en _ready_, esperando al scheduler).
+
+### Semáforos para determinar orden (uso como condition variables)
+
+Los semáforos también son útiles para ordenar eventos en un programa concurrente. En este patrón de uso suele haber un hilo esperando que algo pase y otro dando una señal de que pasó y despertando al primero, lo que da un orden (similar a usar condition variables).
+
+Esto se puede usar, por ejemplo, si un hilo está esperando que una lista esté no-vacía para borrar algo de ella, o para que un _parent_ espere a un _child_; el parent debe llamar a `sem_wait()` y dormir (valor inicial del sem0), y el hijo debe llamar a sem_post() al finalizar (en caso de que el hijo corra antes de que el padre llame a wait el sem pasa de 0 a 1, llama el padre y pasa de 1 a 0, sin necesidad de dormir).
+### El problema de Productor/Consumidor (Bounded Buffer)
+
+Si se usan solo dos semáforos y un buffer, se pueden usar los semáforos para comunicar el estado del buffer. Esto funciona para cualquier cantidad de hilos, pero solo si el valor máximo del buffer es 1. Si se aumenta el tamaño, se genera una race condition.
+
+El llenar un buffer e incrementar el índice del mismo es una sección crítica y por ende debe ser protegida. Usar para esto un binary semaphore lock (envolviendo todo el proceso) genera un **deadlock**; si un consumidor obtiene el lock y el buffer está vacío, se bloquea. Luego, el productor podría llenar el buffer y despertar al consumidor, pero este no podría adquirir el lock ya que el mismo quedó con el consumidor.
+
+_Una solución: añadiendo exclusión mutua_
+
+Se busca reducir el alcance del lock; se los pone exactamente alrededor de la sección crítica:
+
+```c
+sem_t empty;
+sem_t fill;
+sem_t mutex; // Semáforo binario para la exclusión mutua
+
+void *producer(void *arg) {
+    int i;
+    for (i = 0; i < loops; i++) {
+        sem_wait(&empty); // Espera a que haya espacio
+        
+        sem_wait(&mutex); // LOCK DE SECCIÓN CRÍTICA
+        put(i);
+        sem_post(&mutex); // UNLOCK DE SECCIÓN CRÍTICA
+        
+        sem_post(&fill);  // Avisa que hay un dato nuevo
+    }
+}
+
+void *consumer(void *arg) {
+    int i;
+    for (i = 0; i < loops; i++) {
+        sem_wait(&fill);  // Espera a que haya un dato
+        
+        sem_wait(&mutex); // LOCK DE SECCIÓN CRÍTICA
+        int tmp = get();
+        sem_post(&mutex); // UNLOCK DE SECCIÓN CRÍTICA
+        
+        sem_post(&empty); // Avisa que hay espacio libre
+    }
+}
+```
+
+### Lock de lector-escritor
+
+Otro problema es el del lector-escritor, que requiere un lock más flexible que permita que accesos de diferentes estructuras de datos puedan pedir diferentes tipos de locking. Por ejemplo, operaciones en listas, con rutinas como insertar o buscar; mientras que insertar cambia el estado de la lista y por tanto debe ser protegida la sección crítica, buscar solo lee la estructura de datos sin realizar cambios, por lo que podrían hacerse tantas búsquedas concurrentes como se necesite.
+
+Para dar soporte a este tipo de operaciones se usa un **reader-writer lock** (lock de lector/escritor): si se intenta insertar datos se adquiere el lock convencional de escritura, y cuando se desea buscar datos se adquiere el lock de lectura, el cual aumenta la variable `lectores` que sigue la pista de cuántos hilos están leyendo la estructura y el primer lector también adquiere el lock de escritura, para asegurar que no se modifique la estructura mientras se la lee.
+
+Para escribir los escritores deben esperar que todos los lectores terminen. Esto puede resultar injusto para los hilos escritores, sumado a que los lectores pueden monopolizar su lock (_writers starving_) y que la implementación agrega un overhead al sistema.
+
+_Implementación de un lock de tipo lector-escritor._
+```c
+typedef struct _rwlock_t {
+    sem_t lock;      // Protege la variable 'readers'
+    sem_t writelock; // Bloquea a los escritores si hay lectores
+    int readers;     // Contador de lectores activos
+} rwlock_t;
+
+void rwlock_init(rwlock_t *rw) {
+    rw->readers = 0;
+    sem_init(&rw->lock, 0, 1);
+    sem_init(&rw->writelock, 0, 1);
+}
+
+void rwlock_acquire_readlock(rwlock_t *rw) {
+    sem_wait(&rw->lock);
+    rw->readers++;
+    if (rw->readers == 1)
+        sem_wait(&rw->writelock); // El primer lector bloquea a los escritores
+    sem_post(&rw->lock);
+}
+
+void rwlock_release_readlock(rwlock_t *rw) {
+    sem_wait(&rw->lock);
+    rw->readers--;
+    if (rw->readers == 0)
+        sem_post(&rw->writelock); // El último lector libera a los escritores
+    sem_post(&rw->lock);
+}
+
+void rwlock_acquire_writelock(rwlock_t *rw) {
+    sem_wait(&rw->writelock);
+}
+
+void rwlock_release_writelock(rwlock_t *rw) {
+    sem_post(&rw->writelock);
+}
+```
+
+### Estrangulación de hilos
+
+Para prevenir que demasiados hilos hagan algo a la vez y atasquen el sistema, se puede poner un límite a la cantidad de hilos que concurrentemente acceden a una sección crítica, y usar un semáforo para organizarlos. Este enfoque se llama **throttling** (estrangulación) y es una forma de control de admisión.
+
+### Implementando semáforos
+
+Para utilizar semáforos con locks y variables de condición, se utiliza la siguiente implementación (a menudo llamada _Zemaphore_ para evitar conflictos de nombres):
+```c
+typedef struct __Zem_t {
+    int value;
+    pthread_cond_t cond;
+    pthread_mutex_t lock;
+} Zem_t;
+
+// Inicializa el semáforo
+void Zem_init(Zem_t *s, int value) {
+    s->value = value;
+    pthread_cond_init(&s->cond, NULL);
+    pthread_mutex_init(&s->lock, NULL);
+}
+
+// Equivalente a sem_wait()
+void Zem_wait(Zem_t *s) {
+    pthread_mutex_lock(&s->lock);
+    while (s->value <= 0)
+        pthread_cond_wait(&s->cond, &s->lock);
+    s->value--;
+    pthread_mutex_unlock(&s->lock);
+}
+
+// Equivalente a sem_post()
+void Zem_post(Zem_t *s) {
+    pthread_mutex_lock(&s->lock);
+    s->value++;
+    pthread_cond_signal(&s->cond);
+    pthread_mutex_unlock(&s->lock);
+}
+```
+
+Esta forma de programar semáforos es más sencilla y diferente a la de Dijkstra (la que se venía usando) ya que el valor del mismo no puede bajar de 0, por lo que no refleja (con su valor negativo) la cantidad de hilos durmiendo esperando para poder adquirir el lock. Es usada, por ejemplo, en Linux.

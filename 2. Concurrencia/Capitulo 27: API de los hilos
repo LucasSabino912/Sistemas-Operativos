@@ -1,0 +1,56 @@
+# API de los Hilos 
+
+Para crear y controlar hilos (_threads_) se utiliza la biblioteca POSIX (`pthread`).
+### Tipos básicos y funciones de control
+
+- **`pthread_t`**: Tipo de dato que representa un hilo.
+- **`pthread_attr_t`**: Estructura que contiene los atributos de un hilo.
+- **`pthread_attr_init()`**: Inicializa un objeto `pthread_attr_t` con los atributos por defecto.
+- **`pthread_create()`**: Crea un nuevo hilo.
+- **`pthread_join()`**: Bloquea la ejecución hasta que el hilo especificado termine.
+- **`pthread_mutex_destroy()`**: Destruye un _mutex_ (lock) cuando ya no se necesita.
+
+### Creación de Hilos: `pthread_create()`
+
+Toma 4 argumentos:
+
+1. **`thread`**: Puntero a la estructura `pthread_t` para interactuar con el hilo.
+2. **`attr`**: Especifica atributos del hilo (ej. prioridad). Se inicializa con `pthread_attr_init()`. Se puede pasar `NULL` para valores por defecto.
+3. **`start_routine`**: Puntero a la función que el hilo ejecutará.
+4. **`arg`**: Lista de argumentos a pasar a la función (se usan `void*` para permitir cualquier tipo). Se puede pasar `NULL`.
+
+_Nota:_ Una vez creado, el hilo es una entidad independiente que comparte el mismo espacio de direcciones que el hilo original.
+
+### Espera de Hilos: `pthread_join()`
+
+Permite esperar a que un hilo termine su ejecución.
+
+- **`thread`**: El hilo al cual esperar.
+- **`value_ptr`**: Puntero al valor de retorno esperado del hilo. Se puede pasar `NULL`.
+
+**Consideraciones importantes:**
+
+- Al terminar un hilo, su memoria _stack_ se libera; por tanto, **nunca** devuelvas un puntero a una variable local de un hilo.
+- No es obligatorio usar `join` si el hilo es un "trabajador" que vivirá durante toda la ejecución del programa.
+
+### Locks (Mutexes)
+
+Permiten generar exclusión mutua en secciones críticas mediante sincronización.
+
+- **Funcionamiento**: Bloquean el acceso antes de la sección crítica y liberan el _lock_ al finalizar.
+- Si un hilo intenta llamar a `pthread_mutex_lock()` y el _lock_ ya está ocupado, el hilo se bloqueará hasta que este sea liberado.
+- **Regla**: Solo el hilo que posee el _lock_ puede llamar a `pthread_mutex_unlock()`.
+
+### Variables de Condición (`pthread_cond_t`)
+
+Útiles para comunicación entre hilos (esperar a que ocurra un evento). Siempre deben usarse junto a un _lock_.
+
+- **`pthread_cond_wait()`**:
+    - Libera el _lock_ y pone al hilo a dormir atómicamente.
+    - Al despertar (recibir la señal), vuelve a adquirir el _lock_ automáticamente.
+    - Suele llamarse dentro de un bucle `while` para comprobar la condición.
+
+- **`pthread_cond_signal()`**:
+    - Despierta a un hilo que esté esperando por la condición.
+
+_Nota técnica:_ La liberación del _lock_ y el paso a estado de espera deben ser **atómicos** para evitar _race conditions_ (condiciones de carrera).

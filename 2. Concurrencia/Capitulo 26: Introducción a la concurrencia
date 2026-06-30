@@ -1,0 +1,30 @@
+# Introducción a la concurrencia
+Un programa **multi-thread** tiene mas de un punto de ejecución, cada hilo es un sub-proceso en si mismo que avanza de manera asíncrona, pero compartiendo todos un mismo address space, heap y code
+
+Cada hilo mantiene su propio **PC**, **registros** y memoria **stack** (thread local storage), por lo que ante un cambio de contexto estos deben ser **guardados y restaurados**. 
+Los diferentes bloques stack se almacenan en el mismo address space del proceso. Por ello, si el context switch es entre dos hilos del mismo proceso, se usa un thread control block (TCB) en lugar de un PCB, manteniendo address space y por tanto page table, lo cual mejora el desempeño.
+
+## Ventajas de usar hilos:
+- **Paralelismo:** se puede dividir el trabajo en hilos, haciéndolo mas rápido y eficiente. Convertir un programa single-thread a multi-thread es llamado **paralelización**
+- Evitar **bloquear** un programa en espera de un I/O. Mientras un hilo espera, el CPU superpone las tareas puede ejecutar otra del mismo programa
+A diferencia de hacer multiprogramming, al compartir address space es más fácil compartir información.
+
+## Scheduling y Race conditions
+La ejecución de los procesos es administrada por el scheduler del SO, por lo que no se puede asumir que hilo se ejecutará en cada momento (incluso si uno es creado antes que otro). 
+Una vez llamado, cada uno se ejecuta de forma independiente a su caller hasta retornar. Esto aumenta la complejidad general del funcionamiento del sistema, por lo que es preferible intentar minimizar las interacciones entre ellos.
+
+Que diferentes hilos puedan compartir información puede dar lugar a errores. Por ejemplo, en el caso de dos hilos incrementando un contador común; el primer hilo puede modificado la variable, pero si antes de poder guardar el resultado un context switch guarda el estado actual del proceso y corre el hilo 2 (el cual modifica la variable y guarda en memoria el nuevo valor) cuando vuelva a correr el hilo 1 este realizara la instrucción que anteriormente no pudo, guardando el valor del contador que él tenía, pisando el contenido y haciendo que el resultado sea diferente al esperado.
+
+Esto es llamado una **race condition** y genera **resultados indeterministas**.
+
+Cuando más de un hilo ejecuta una misma parte del código que contiene un recurso compartido, (por ej. una variable o estructura de datos) y se genera una race condition, esa parte es llamada **sección crítica**. Como esas zonas no deberían ser ejecutadas al mismo tiempo por más de un hilo, se busca asegurar una **exclusión mutua** que garantice el acceso de solo un hilo a la vez.
+
+## Atomicidad
+Una solución que garantiza la exclusión mutua es tener instrucciones que, en un solo paso, se
+ejecuten por completo y remuevan así la posibilidad de un interrupt intermedio. Es decir, que sean
+**atómicas**; que o bien la instrucción se ejecute hasta completarse, o bien no se ejecute.
+
+En general esto no es posible, por lo que, usando soporte del hardware y del SO, se construyen
+diferentes **primitivas de sincronización**; código multi-thread en el que cada hilo accede a las
+secciones críticas de forma sincronizada y controlada, evitando las condiciones de carrera y
+asegurando la exclusión mutua.
