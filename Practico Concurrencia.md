@@ -1,5 +1,4 @@
 # Concurrencia
-
 **Ejercicio 1.** Dados estos 3 procesos en paralelo
 ```c
 Pre: x = 0
@@ -47,11 +46,16 @@ P1: while(1) {
 	x--;
 }
 ```
-**(a)** ¿El mulitprograma termina?
-
+**(a)** ¿El multiprograma termina?
+No, no termina ya que while(1) es siemore true y siempre se ejecuta
 
 **(b)** ¿Que valores puede tomar x?
+La variable `x` puede tomar **cualquier valor entero** (es decir: ..., -3, -2, -1, 0, 1, 2, 3, ... hacia el infinito o menos infinito).
 
+**Justificación:**
+1. **Falta de atomicidad:** Las sentencias `x++` y `x--` no son atómicas. A nivel de lenguaje ensamblador, cada una requiere tres pasos independientes: leer el valor de la memoria a un registro de la CPU, modificar el registro (sumar o restar 1), y escribir el nuevo valor en la memoria.
+2. **Condiciones de carrera (Race conditions):** El planificador (scheduler) del Sistema Operativo puede interrumpir (hacer un cambio de contexto) a cualquiera de los procesos en medio de estos tres pasos. Esto provoca que un proceso pueda sobrescribir la memoria con un cálculo desactualizado, haciendo que se "pierda" el efecto del incremento o del decremento del otro proceso (problema conocido como _Lost Update_).
+3. **Deriva no acotada (Unbounded Drift):** Como estas operaciones están dentro de un bucle infinito `while(1)`, los procesos ejecutan iteraciones constantemente. El estado corrupto de `x` al finalizar una iteración se convierte en el estado inicial de la siguiente. De esta forma, las pérdidas de actualizaciones (incrementos o decrementos perdidos) se **acumulan** en el tiempo sin ningún límite. Si sistemáticamente se pierden decrementos, `x` tomará valores positivos cada vez más altos; si se pierden incrementos, tomará valores negativos cada vez más bajos. Por lo tanto, el rango de valores posibles no está acotado.
 
 **Ejercicio 3.** Considere los procesos
 ```c
@@ -66,10 +70,14 @@ P1: y = y + 2;
 
 ```
 **(a)** Calcule los posibles valores finales de x e y.
-
+- Si cont = false se ejecuta primero entonces y = 4 y x = 1
+- Si cont = false se eejcuta despues, x puede tomar valores x={1,2,4,8,16}, si y = 4, solo toma x={1,4,16}. y siempre valdra 4 al final
 
 **(b)** Si en P1 se cambia la instrucción y = y + 2; por y = y + 1; y = y + 1; en dos líneas distintas.
 ¿Cambia esto los posibles valores finales? Justifique.
+
+Si cambia, ya que puede hacer que x tome valores potencias de 2, 3 y 4 
+
 
 **Ejercicio 4.** Considere los procesos 
 ```c
@@ -82,16 +90,25 @@ P0: while (n<100){
 
 P1: while (n<100){
 	n++;
-	m=n;
+	m = n;
 }
-
 ```
-**(a)** ¿A cuanto pueden diferir como ma# ximo m y n durante la ejecucion?
-**(b)** ¿En cuantas iteraciones termina? Indicar mınimo y maximo.
+**(a)** ¿A cuanto pueden diferir como máximo m y n durante la ejecución?
+Pueden diferir máximo en 100, ya que si n++; se ejecuta 100 veces y m=n nunca entonces m=0 y n=100
+
+**(b)** ¿En cuantas iteraciones termina? Indicar mínimo y máximo.
+Máximo 99 iteraciones
+Mínimo 7 iteraciones
+
 **(c)** ¿Que valores pueden tomar n y m en la Post? Justifique de manera rigurosa.
-
+- Si el ultimo en escribir fue P1, entonces el valor de n es **100**  
+- Si el ultimo en escribir fue P0, entonces n puede ser cualquier valor de la multiplicación, como máximo sera **198**
+- m tomara el ultimo valor de n al finalizar la ultima iteración ejecutada
+**Justificación Rigurosa:** Debido a la **no atomicidad** del bloque `while`, no hay garantía de que `m` siempre sea igual a `n` al finalizar el programa.
+- Si el último proceso en terminar fue P1, es muy probable que **`m = 100`** y **`n = 100`**.
+- Si el último proceso en terminar fue P0, puede haber un escenario donde `n` saltó a 198, pero `m` todavía no fue actualizado, o fue actualizado a 198.
+- **Conclusión:** `n` es siempre ≥100. `m` será igual al valor de `n` al final de la última iteración completada por el proceso que "ganó" la última escritura antes de que la condición del `while` se volviera falsa para ambos.
 # Locks
-
 **Ejercicio 5.** La modificación en el punto (b) del Ejercicio 3 introduce cambios en los posibles valores finales, utilice locks para que vuelvan a devolver los mismos valores del punto (a).
 
 
@@ -252,6 +269,7 @@ P0: lock(printer);
 	lock(disk);
 	unlock(disk);
 	unlock(printer)
+
 P1: lock(printer);
 	unlock(printer);
 	lock(cd);
@@ -260,13 +278,13 @@ P1: lock(printer);
 	unlock(cd)
 
 P2: lock(cd);
-unlock(cd);
-lock(printer);
-lock(disk);
-lock(cd);
-unlock(cd);
-unlock(disk);
-unlock(printer)
+	unlock(cd);
+	lock(printer);
+	lock(disk);
+	lock(cd);
+	unlock(cd);
+	unlock(disk);
+	unlock(printer)
 ```
 (a) De la planificacion que lleva a un estado de deadlock.
 (b) Agregue semáforos de manera de evitar que los procesos entren en deadlock. Trate de maximizar la concurrencia.
