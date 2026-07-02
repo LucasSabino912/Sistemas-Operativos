@@ -1,0 +1,335 @@
+# Ejercicio 1
+Cuantas 'a' se escriben en test.txt si se descomenta cada linea comentada (1 caso a la vez)
+```c
+// close(dup(open(test.txt)))  #0
+// dup(close(open(test.txt)))  #1
+// close(open(test.txt))       #2
+// dup(open(test.txt))         #3
+write(3, "a", 1); // escribe en el fd 3
+write(4, "a", 1); // escribe en el fd 4
+```
+
+Suponiendo que los fd:
+- 0 - stdin
+- 1 - stdout
+- 2 - stderr
+
+**Caso 1:**
+`close(dup(open(test.txt)))`
+- open abre el fd 3
+- dup abre el 4 y duplica el fd 3
+- close cierra el 4
+- write escribe una a en el 3 y en el 4 nada porque esta cerrado
+- Rta: 1a
+
+**Caso 2:**
+`dup(close(open(test.txt)))`
+- open abre el fd 3
+- close lo cierra
+- Como close retorna 0 al cerrar el fd, dup dupea el fd 0 en el 3
+- como fd 3 es el stdin, no imprime niguna a
+- Rta: 0 a
+
+**Caso 3:**
+`close(open(test.txt))`
+- open abre el fd 3
+- close lo cierra
+- No imprime a
+
+**Caso 4:**
+`dup(open(test.txt))`
+- open abre el fd 3
+- dup lo dupea en el 4
+- write escribe una a en el 3 y otra a en el 4
+- Rta: 2a
+
+# Ejercicio 2
+Tipico ejercicio de paginacion (10,10,12) con un page dir y dos page tables (las 2 page tables iguales) 
+a) pasar direcciones de virtual a fisica. 
+b) modificar la tabla para que baje el consumo de memoria sin cambiar  a donde apuntan
+
+- **PD (page directory):** 10 bits
+- **PT (pag table):** 10 bits
+- **Offset:** 12 bits (determina tamaño de pagina 2¹² = 4096 bytes = 4KiB)
+
+a) traducir la direccion virtual `0x00401005`
+- El PD tiene entradas validas que apuntan a tablas de paginas
+- Las dos  PT son identicas y tienen mapeada la primera entrada hacia el marco de memoria fisica PFN  `0x99`
+
+`0x00401005` -> Pasoa binario
+0000 0000 01|00 0000 0001 | 0000 0000 0101
+- PD: 0000 0000 01 ->1
+- PT: 00 0000 00001 -> 1
+- Offset: 0000 0000 0101 -> 5
+El camino de traduccion
+- La cpu va al page directory y busca al entrada 1. Esa entrada le dice donde esta la tabla de paginas
+- La cpu va a esa Page table y busca la entrada 1. El enunciado nos dice que tiene mapeada la primera entrada al PFN `0x99`
+- Armar la direccion fisica se fomra ocncantencicando el PFN con el Offset
+
+	DF = PFN ++ Offset -> 0x99005
+
+Mas traducciones:
+- El **Page Directory** tiene entradas que apuntan a las tablas de páginas.
+- Las tablas de páginas son idénticas y tienen cargadas las siguientes traducciones en sus primeras posiciones:
+    - Entrada `0`: apunta al marco físico (**PFN**) `0x10`
+    - Entrada `1`: apunta al marco físico (**PFN**) `0x2A`
+    - Entrada `2`: apunta al marco físico (**PFN**) `0x7F`
+    - Entrada `3`: apunta al marco físico (**PFN**) `0xC5`
+
+`0x004020A5` -> paso a binario
+00000000010000000010000010100101
+- PD: 000000000001 -> 1. Apunta a PT
+- PT: 000000000010 -> 2. Apunta a PFN
+- Offset: 000010100101 -> 0A5
+
+DV: 0x7F0A5
+
+`0x00800FFF`
+0000 0000 1000 0000 0000 1111 1111 1111
+- PD:  0000 0000 10 -> 2
+- PT:  00 0000 0000 -> 0 
+- Offset: 1111 1111 1111 -> FFF
+DV = 0x10FFF
+
+
+b) modificar la tabla para que baje el consumo de memoria sin cambiar  a donde apuntan
+
+Como las dos tablas contienen exactamente la misma información (mapean las mismas direcciones virtuales a las mismas direcciones físicas), **no hay ninguna necesidad de tener dos copias idénticas ocupando espacio en la RAM**.
+
+La modificación consiste en hacer que **ambas entradas del Page Directory apunten a la misma y única Page Table física en la RAM**.
+
+# Ejercicio 3
+```c
+pre: barco  = raton = 0; s1 = 1; 0 < N
+
+while(true){
+	barco++;
+	wait(s1);
+}
+
+while(true){
+	raton++;
+	post(s1);
+}
+
+post: |barco - raton| <= N
+```
+a) Dar planificación que muestre que no se cumple el invariante
+La clave es dejar durmiendo a ratón y hacer que barco corra todas las veces que sea necesario
+- **Estado incial:** `barco = 0, raton = 0, s1 = 1`
+Corre H1
+- barco++ -> barco = 1
+- wait(s1) -> s1 = 0 y no se duerme
+Corre H1 
+- barco++ -> barco = 2
+- hace wait(s1) -> s1 = -1
+En este punto  barco = 2, raton = 0 => |barco - raton| es |2 - 0| = 2, Si N fuera 1 ya se hubiera roto
+Corre H2
+- raton++ -> raton =1
+- post(s1) -> se despierta s1
+Corre H1
+- barco++ -> barco = 3
+- wait(s1) y se vuelve a dormir
+
+Como este ciclo se repite infinitas veces, si repetimos esto N veces, vamos a llegar a tener
+barco = N+1, raton N-1
+
+|barco - raton| = |(N+1) - (N-1)| = |2| = 2
+
+Si elegimos un escenario deonde N = 1 la diferencia siempre sera 2 y rompe el invariante
+
+b) Este caso se da siempre?
+No, el scheduler por lo general le da un tiempo a cada proceso, y cada vez que P1 haga post(s1), sabemos que P0 se va a ejecutar una vez mas, por eso, por lo general la diferencia siemrpe va a ser entre 0 y 1 
+
+c) Reparar la sincronizan con semáforos maximizando concurrencia
+Para que el invariante se cumpla y maximizar la concurrencia podes hacer que un proceso sea delante hasta N veces mas que el otro, que el scheduler le de todo el tiempo que quiera y que lo despierte al otro también hasta N veces
+
+```c
+pre: barco = 0 = raton; 0 < N; s1 = N; s2 = 0
+
+while(1){
+	wait(s1);
+	barco++;
+	post(s2);
+}
+
+while(1){
+	wait(s2);
+	raton++;
+	post(s1);
+}
+```
+# Ejercicio 4
+Multiprograma que nunca termina con atomicidad linea a linea, variables `i` y `a[]` compartidas y `a[0,16)` (Indice máximo 15)
+```c
+int i = 0
+int a[16]
+sem_t s1 = 15; // Permito colchon de 15 inices
+sem_t s2 = 0;  // No puedo decrementar
+sem_t mutex = 0; // Para proteger la CZ de i
+
+while(1){ 
+	wait(s1); // ¿tengo permiso para subir?
+	wait(mutex); // Entro a la CZ de i
+	a0=i;
+	a0++;
+	i=a0;
+	post(mutex);
+	post(bajar);
+}
+
+while(1){
+	wait(bajar);
+	wait(mutex);
+	a1=1;
+	a1--;
+	i=a1;
+	post(mutex);
+	post(subir);
+}
+
+while(1){
+	wait(mutex);
+	a[i] = 1;
+	post(mutex);
+}
+```
+Sincronizar con semáforos, el objetivo principal es no salirse de los limites del arreglo, sin embargo, mientras mas posiciones se toquen, mas puntos tendrá el ejercicio
+
+# Ejercicio 5
+HDD 7200 RPM, 8.5 latencia de búesqueda, 220 MiB/s tasa de transferencia maximoa
+a) Calcular tasa de transferencia al azar para bloques de 1MiB
+Cundo el disco lee un bloque de forma aleatoria, el cabezal tiene que hacer tres cosas
+- **Buscar la Pista (Tseek):** Mover el brazo hasta la pista correcta 8.5ms
+- **Esperar que gire (Trot):** Latencia rotacional promedio (media vuelta)
+- **Transferir los datos (Ttrans):** El tiempo que le lleva al cabezal leer los bytes del plato
+$$\text{Tiempo Total} = T_{\text{seek}} + T_{\text{rot}} + T_{\text{trans}}$$
+Paso 1: Trot
+$$\text{Tiempo por vuelta} = \frac{60 \times 1000}{7200 \text{ RPM}} = \frac{60000}{7200} = 8.33 \text{ ms}$$
+y como es emedia vuelta => 8.33ms/2 = 4.165ms
+
+Paso 2: Ttrans
+$$T_{\text{trans}} = \frac{\text{Tamaño del bloque}}{\text{Tasa máxima}} = \frac{1 \text{ MiB}}{220 \text{ MiB/s}} \approx 0.004545 \text{ s} = 4.545 \text{ ms}$$
+
+Paso 3: Sumar los tiempor para el acceso aleatorio
+$$T_{\text{access}} = 8.5 \text{ ms} (\text{seek}) + 4.165 \text{ ms} (\text{rot}) + 4.545 \text{ ms} (\text{trans}) = \mathbf{17.21 \text{ ms}}$$
+
+PAso 4: Refectiva
+$$R_{\text{efectiva}} = \frac{1 \text{ MiB}}{17.21 \text{ ms}} = \frac{1 \text{ MiB}}{0.01721 \text{ s}} \approx \mathbf{58.11 \text{ MiB/s}}$$
+
+b) si se duplica la velocidad de rotación (14400 RPM), la transferencia maxima se duplica y el tiempo de rotacion baja a la mitad. Si apra duplicar la velocidad de rotacion aumenta un 50% el precio, valr la pena la ganancia para bloques al azar de 1MiB180
+
+# Ejercicio 6
+File system unix con 12 bloques directos, 1 indirecto, 1 doble indirecto, 1 triple indirecto. Con bloques de 4KiB y tabla de inodos ed 2²⁰
+a) Calcular ekl tamalio de b-map, dtaa-region y maxfiles para indices de bloque de 32b y 48 b
+
+### 📋 Datos iniciales del enunciado:
+
+- **Estructura del i-nodo:** 12 bloques directos, 1 indirecto, 1 doble indirecto, 1 triple indirecto.
+    
+- **Tamaño de bloque ($S_{\text{bloque}}$):** $4\text{ KiB} = 4096\text{ bytes} = 2^{12}\text{ bytes}$.
+    
+- **Cantidad de i-nodos ($N_{\text{inodos}}$):** $2^{20}$ i-nodos.
+    
+
+### 1. Caso con Índices de Bloque de 32 bits (4 bytes)
+
+Un índice de bloque de 32 bits significa que cada puntero o dirección que guardamos dentro de un bloque ocupa exactamente **$4\text{ bytes}$** ($32\text{ bits} / 8$).
+
+#### Paso 1.1: Calcular Punteros por Bloque ($P$)
+
+¿Cuántas direcciones/punteros a otros bloques caben dentro de un único bloque de 4 KiB?
+
+$$P = \frac{\text{Tamaño de bloque}}{\text{Tamaño de puntero}} = \frac{4096\text{ bytes}}{4\text{ bytes}} = 1024 \text{ punteros } (2^{10})$$
+
+#### Paso 1.2: Calcular el tamaño máximo de un archivo (`maxfiles`)
+
+El tamaño máximo de un archivo es la cantidad total de bloques de datos a los que puede acceder un i-nodo multiplicado por el tamaño de un bloque.
+
+- **Bloques Directos:** $12$
+    
+- **Indirecto Simple:** $P = 1024$
+    
+- **Doble Indirecto:** $P^2 = 1024^2 = 1.048.576$
+    
+- **Triple Indirecto:** $P^3 = 1024^3 = 1.073.741.824$
+    
+
+$$\text{Total de bloques} = 12 + 1024 + 1024^2 + 1024^3 = 1.074.791.436 \text{ bloques}$$
+
+$$\text{maxfiles} = \text{Total de bloques} \times 4\text{ KiB} \approx \mathbf{4\text{ TiB}}$$
+
+_(Matemáticamente exacto: $12 \times 4\text{ KiB} + 4\text{ MiB} + 4\text{ GiB} + 4\text{ TiB} = \mathbf{4.0040078\text{ TiB}}$)._
+
+#### Paso 1.3: Calcular el tamaño máximo de la región de datos (`data-region`)
+
+Con índices de 32 bits, la cantidad máxima de bloques direccionables en todo el disco rígido está limitada por el tamaño del índice ($2^{32}$ combinaciones).
+
+$$\text{Bloques máximos en disco} = 2^{32} \text{ bloques}$$
+
+$$\text{data-region} = 2^{32} \text{ bloques} \times 4\text{ KiB} = 2^{32} \times 2^{12}\text{ bytes} = 2^{44}\text{ bytes} = \mathbf{16\text{ TiB}}$$
+
+#### Paso 1.4: Calcular el tamaño del mapa de bits de bloques (`b-map`)
+
+El bitmap necesita exactamente **1 bit por cada bloque de la región de datos** para saber si está libre (0) u ocupado (1).
+
+$$\text{Tamaño b-map (bits)} = 2^{32} \text{ bits}$$
+
+Pasándolo a bytes/regiones legibles:
+
+$$\text{b-map} = \frac{2^{32} \text{ bits}}{8 \text{ bits/byte}} = 2^{29}\text{ bytes} = \mathbf{512\text{ MiB}}$$
+
+### 2. Caso con Índices de Bloque de 48 bits (6 bytes)
+
+Un índice de bloque de 48 bits significa que cada puntero o dirección ocupa exactamente **$6\text{ bytes}$** ($48\text{ bits} / 8$).
+
+#### Paso 2.1: Calcular Punteros por Bloque ($P$)
+
+$$P = \frac{\text{Tamaño de bloque}}{\text{Tamaño de puntero}} = \frac{4096\text{ bytes}}{6\text{ bytes}} = \mathbf{682.66 \text{ punteros}}$$
+
+_(¡Atención! Como no podemos guardar una fracción de puntero en el disco, descartamos el decimal. Entran de forma entera **682 punteros** por bloque)._
+
+#### Paso 2.2: Calcular el tamaño máximo de un archivo (`maxfiles`)
+
+Volvemos a sumar las capacidades de direccionamiento del i-nodo con nuestro nuevo $P = 682$:
+
+- **Bloques Directos:** $12$
+    
+- **Indirecto Simple:** $682$
+    
+- **Doble Indirecto:** $682^2 = 465.124$
+    
+- **Triple Indirecto:** $682^3 = 317.214.568$
+    
+
+$$\text{Total de bloques} = 12 + 682 + 465.124 + 317.214.568 = 317.680.386 \text{ bloques}$$
+
+$$\text{maxfiles} = 317.680.386 \text{ bloques} \times 4096\text{ bytes} = 1.301.218.861.056\text{ bytes} \approx \mathbf{1.18\text{ TiB}}$$
+
+#### Paso 2.3: Calcular el tamaño máximo de la región de datos (`data-region`)
+
+Con índices de 48 bits, la cantidad máxima de bloques direccionables teóricamente en el disco es de $2^{48}$:
+
+$$\text{Bloques máximos en disco} = 2^{48} \text{ bloques}$$
+
+$$\text{data-region} = 2^{48} \text{ bloques} \times 4\text{ KiB} = 2^{48} \times 2^{12}\text{ bytes} = 2^{60}\text{ bytes} = \mathbf{1\text{ EiB}} \text{ (Exabyte)}$$
+
+#### Paso 2.4: Calcular el tamaño del mapa de bits de bloques (`b-map`)
+
+El bitmap necesita 1 bit por cada uno de los $2^{48}$ bloques máximos de la región de datos:
+
+$$\text{Tamaño b-map (bits)} = 2^{48} \text{ bits}$$
+
+Pasándolo a bytes:
+
+$$\text{b-map} = \frac{2^{48} \text{ bits}}{8 \text{ bits/byte}} = \frac{2^{48}}{2^3} = 2^{45}\text{ bytes} = \mathbf{32\text{ TiB}}$$
+
+### 📌 Resumen de Respuestas para el Examen:
+
+|**Estructura**|**Índices de 32 bits (4 bytes)**|**Índices de 48 bits (6 bytes)**|
+|---|---|---|
+|**`maxfiles`**|**~4.004 TiB** ($12 + 1024 + 1024^2 + 1024^3$ blq)|**~1.18 TiB** ($12 + 682 + 682^2 + 682^3$ blq)|
+|**`data-region`**|**16 TiB** ($2^{32} \times 4\text{ KiB}$)|**1 EiB** ($2^{48} \times 4\text{ KiB}$)|
+|**`b-map`**|**512 MiB** ($\frac{2^{32}}{8}\text{ bytes}$)|**32 TiB** ($\frac{2^{48}}{8}\text{ bytes}$)|
+
+_(Nota de color sobre el dato de "tabla de inodos de $2^{20}$": sirve si el ejercicio te pidiera calcular la sobrecarga total de almacenamiento de las estructuras de control (`b-map de inodos` o el tamaño total ocupado por los i-nodos en disco), pero para calcular el `b-map de bloques`, `data-region` y `maxfiles`, no hace falta usarlo)._
