@@ -1,0 +1,146 @@
+# Ejercicio 1
+Describir que hace el programa, cuantos padres e hijos tiene, etc. Se ejecuta con: ./a.out ./a.out./a.out./a.out./a.out./a.out./a.out (7 ./a.out)
+
+```c
+int main(int argc, char **argv){
+	char buff[L] = {'\0'}; // Pone \0 en la ultima posicion de buff
+	
+	// Si hay menos de dos argumentos el programa termina
+	if (argc < 2){
+		return 0;
+	}
+	
+	// fork
+	int rc = fork();
+	
+	// Si falla retornamos -1
+	if (rc < 0){
+		return -1;
+	}
+	
+	
+	if(rc == 0){
+		close(1); // Cierra el fd 1 (stdout)
+		open(argv[0], 0); // Abre el archivo en fd 1
+		read(1, buff, L); // Lee L bytes del fd 1 y los guarda en buff
+		close(0); // Cierra el fd 0
+		open(argv[0], O-TRUNCATE | O-WRONLY); // abre el archivo en fd 0
+		write(0, buff, L); // Escribe L bytes del de buff en el fd 0
+	} else {
+		execvp(argv[1], argv+1) // Ejecuta el segundo
+	}
+}
+```
+El proceso hijo recorta el primer archivo en L bytes, el padre ejecuta el siguiente ./a.out
+El padre se pasa todos los argumentos restantes (6), y va cambiando de archivo por cada llamada, recortando el primer elemento de la lista
+Entonces el programa tiene un solo padre y 6 hijos
+
+# Ejercicio 2
+Esquema de paginación risc-v con páginas de 4 KiB de 3 niveles con formato 9,9,9,12 -> 44,12
+
+L2 (9 bits) | L1 (9 bits) | L0 (9 bits) | Offset(12 bits)
+
+Direccion física (56 bits): PPN ++ Offset
+
+satp es mi tabla raiz, apunta a L2. Si V = 1 entonces la entrada vale 
+
+**Traducciones:** 
+a) 0x0000
+1. Separar la DV: Offse 000, como el resto es 0x0, nos dice que L2 = L1 = L0 = 0
+2. Caminarlas tablas
+	- Vamos a satp (L2 en 0xFE0), la entrada 0 nos manda a 0xFEA
+	- Vamos a 0xFEA la entrada 0 nos manda a 0xAD0BE
+	- Vamos a 0xAD0BE la entrada 0 nos da el PPN 0x0000000ABAD, con flaggs x y v, como v es valida entonces pegamos el PPN al offset
+	**DF =** `0x0000000ABAD000` 
+
+b) 0x1000
+- L2: 0, L1, 0 y L0: 1
+- Offset: 000
+1. Directo a 0xAD0BE, la entrada 1 es 0x000CAFECAFE, pero el vit de validez es 0, por lo tanto
+	**PAGE FAULT**
+
+b) Traducir la Direccion fisica 0xDECADA980 a todas las virtuales que la apuntan
+- Guardamos el Offset que es `980`
+- Rastreo el PPN 0xDECADA en L0. El indice L0 es opbligatoriamente 0x002 y tiene bit valido
+- Como la tabla L0 esta guardada en 0xAD0BE, busco en L1 y buscar que entradas apuntan al PPN 0xAD0BE
+- Entrada 0x000, 0x001 y 0x002. Hay 3 caminos posibles para el indice de L1
+- Y ahora, como 0xAD0BE esta en 0xFEA, busco de donde viene en L2. 
+- Las direcciones 0x000, 0x001 y 0x002
+
+Como el formato de la direccion virtual es 9,9,9,12. Al cruzarse los caminos de L2, L1 y la unicas de L0, se forman 9 comniaciones 
+
+- 000000000 000000000 000000002 980
+- 000000000 000000001 000000002 980
+- 000000000 000000002 000000002 980
+- 000000000 000000003 000000002 980
+- 000000001 000000000 000000002 980
+- 000000001 000000001 000000002 980
+- 000000001 000000002 000000002 980
+- 000000001 000000003 000000002 980
+- 000000002 000000000 000000002 980
+- 000000002 000000001 000000002 980
+- 000000002 000000002 000000002 980
+- 000000002 000000003 000000002 980
+
+# Ejercicio 3
+El siguiente código en maquina y su desensamblador risc-v computa la suma prefijo en el mismo arreglo. El arreglo esta en el segmento ELF.bss y empieza 0x2FC0 y termina en 0x3008. como sus elementos son usigned long. cada uno ocupa 8 bytes y por lo tanto tiene 9 elementos
+
+Usar el esquema del ej2, scribir la traza de memoria fisica incluyendo instrucciones y datos
+
+```c
+0000000000000634 <main>
+
+634: 0613        li a2, 0x3008 # <__BSS_END__> &a[9]
+636: b206        li a5, 0x2FC8 # <a+0x8> &a[i]
+638: 6393        ld a4, 0(s5)  # a4 = a[i]
+63a: ff87b683    ld a3, -8(a5) # a3 = a[i-1]
+63e: 9736        add a4, a4,a3  
+640: e398        sd a4, 0(5)   # a[i] = a4    
+642: 07a1        addi a5,a5,8  # i++
+644: fec79ae3    bne a5, a3, 0x638 # <mian+0x10>, "i<9"
+648: 8092        ret
+```
+El código esta haciedno una **suma prefijo o acumulativa** en un arreglo `a[]`
+- El arreglo empieza en `0x2FC0`
+- Como son 9 elementos `unsigned long` (8 bytes cada uno), el arreglo ocupa 9x8 = 72 bytes
+- `0x2FC0 + 72 bytes` da `0x3008` justo el final de BSS
+El loop principal (638 a 644) hace: `a[i] = a[i] + [a-1]`
+
+Como el ejercicio pide traza de memoria fisica, no puedo escribir directamente `0x2Fc0`. Hay que traducirla a la dirección física usando el esquema anterior
+
+Direcciones de los elementos
+- a[0] esta en 0x2FC0
+- a[1] esta en 0x2FC8
+- ...
+- a[8] esta en 0x3000
+
+En cada iteración $i$, el puntero `a5` apunta a la dirección virtual `base + (i * 8)`. Se realizan dos lecturas (de `a[i]` y `a[i-1]`) y una escritura en `a[i]`.
+
+# Ejercicio 4
+Atomicidad línea a línea a[] compartido, i,j locales
+```c
+PRE: a[n] = {2, 2, 2,..., 2}
+
+// P0
+i=0
+sem_t s1 = 0;
+sem_t s2 = 1;
+
+while(i<N){
+
+	a[i] = 0;
+	i++;
+}
+
+// P1
+j=0;
+while(j<N){
+	a[j] = 1;
+	j++;
+}
+```
+
+a) mostrar escenario donde termine en {1,0,1,0,...,1,0}
+Sin agregar semaforos, un escenario donde termine en esa secuencia, deberia 
+
+b) Agregando semáforos con condicionales sobre, i,j o sin ellos obtener un resultado final determinista como el anterior
